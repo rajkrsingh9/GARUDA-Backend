@@ -1,8 +1,8 @@
 # ------------------------------------
 # Node.js Dependencies and Build Artifacts
 # ------------------------------------
-./node_modules
-./node_modules
+/node_modules
+/node_modules
 /backend/dist
 /frontend/dist
 
@@ -12,6 +12,8 @@
 # CRITICAL: Exclude all .env files that contain secrets
 # The backend/.env file contains your DB crede.
 .env 
+/package-lock.json
+
 
 # Node.js Log files
 npm-debug.log

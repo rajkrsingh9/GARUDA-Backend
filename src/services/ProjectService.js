@@ -1,19 +1,15 @@
-// backend/src/services/ProjectService.js
+// backend/src/services/ProjectService.js - Updated to handle auxData and original coordinates
 import { DBClient } from '../db/DBClient.js';
 import { ProjectModel } from '../models/ProjectModel.js';
 import { AreaOfInterestModel } from '../models/AreaOfInterestModel.js';
 import { SubscriptionModel } from '../models/SubscriptionModel.js';
 import { AlertChannelCatalogueModel } from '../models/AlertChannelCatalogueModel.js';
-import { UsersToProjectModel } from '../models/UsersToProjectModel.js'; // ADDED: Missing import
+import { UsersToProjectModel } from '../models/UsersToProjectModel.js';
 
 const db = DBClient.getInstance();
 
 export class ProjectService {
 
-    /**
-     * Creates a new project with AOIs and subscriptions
-     * FIXED: Proper subscription validation using aoiId
-     */
     async createProject(bundle, currentUserId) {
         const client = await db.pool.connect();
         try {
@@ -21,10 +17,9 @@ export class ProjectService {
 
             const { projectName, description, auxData } = bundle.projectBasicInfo;
 
-            // FIXED: Validation - Ensure all AOIs have at least one active subscription
+            // Validation - Ensure all AOIs have at least one active subscription
             if (bundle.aoiData && bundle.aoiData.length > 0) {
                 for (const aoi of bundle.aoiData) {
-                    // Generate the aoiId that will be used in the DB
                     const aoiIdToCheck = aoi.aoiId || `aoi_${aoi.clientAoiId || Date.now()}`;
 
                     const hasSubscription = bundle.subscriptionData?.some(
@@ -33,8 +28,7 @@ export class ProjectService {
 
                     if (!hasSubscription) {
                         throw new Error(
-                            `AOI "${aoi.name}" must have at least one alert channel subscription. ` +
-                            `Expected aoiId: ${aoiIdToCheck}`
+                            `AOI "${aoi.name}" must have at least one alert channel subscription.`
                         );
                     }
                 }
@@ -60,7 +54,6 @@ export class ProjectService {
             });
 
             // 2. Add Users to Project WITH ROLES
-            // FIXED: Ensure current user is added if not in userData
             const userDataWithCreator = [...bundle.userData];
             if (!userDataWithCreator.some(u => u.userId === currentUserId)) {
                 userDataWithCreator.push({ userId: currentUserId, roles: [] });
@@ -75,9 +68,8 @@ export class ProjectService {
                 await model.save(client);
             }
 
-            // 3. Process AOIs with multi-polygon support
-            // CRITICAL: Track aoiId mappings for subscription insertion
-            const aoiIdMap = new Map(); // clientAoiId -> actual aoiId
+            // 3. Process AOIs with multi-polygon support and original coordinates
+            const aoiIdMap = new Map();
 
             for (const aoiItem of bundle.aoiData) {
                 const geomString = JSON.stringify(aoiItem.geomGeoJson);
@@ -86,12 +78,23 @@ export class ProjectService {
                     throw new Error("Invalid GeoJSON geometry provided for AOI: " + aoiItem.name);
                 }
 
-                // FIXED: Ensure aoiId is set consistently
                 const finalAoiId = aoiItem.aoiId || `aoi_${aoiItem.clientAoiId || Date.now()}`;
                 aoiIdMap.set(aoiItem.clientAoiId, finalAoiId);
 
+                // CRITICAL: Extract original coordinates from bufferConfig
+                const bufferConfig = aoiItem.geomProperties?.bufferConfig || [];
+                
+                // Store original coordinates in geom_properties
+                const enhancedGeomProperties = {
+                    ...aoiItem.geomProperties,
+                    originalCoordinates: bufferConfig.map(config => ({
+                        type: config.type,
+                        coordinates: config.originalCoordinates,
+                        buffer: config.buffer
+                    }))
+                };
+
                 if (aoiItem.geomGeoJson.type === 'GeometryCollection') {
-                    const bufferConfig = aoiItem.geomProperties?.bufferConfig || [];
                     const geometryParts = [];
 
                     for (let idx = 0; idx < aoiItem.geomGeoJson.geometries.length; idx++) {
@@ -130,10 +133,11 @@ export class ProjectService {
                     const unionResult = await client.query(unionQuery, geometryParts);
                     const finalWKT = unionResult.rows[0].final_geom_wkt;
 
+                    // CRITICAL: Store in auxdata column, not geom_properties
                     const aoiQuery = `
                         INSERT INTO area_of_interest
-                        (project_id, aoi_id, name, geom, geom_properties, status)
-                        VALUES ($1, $2, $3, ST_GeomFromText($4, 4326), $5, 1)
+                        (project_id, aoi_id, name, geom, geom_properties, auxdata, status)
+                        VALUES ($1, $2, $3, ST_GeomFromText($4, 4326), $5, $6, 1)
                         RETURNING id;
                     `;
                     await client.query(aoiQuery, [
@@ -141,7 +145,8 @@ export class ProjectService {
                         finalAoiId,
                         aoiItem.name,
                         finalWKT,
-                        aoiItem.geomProperties
+                        enhancedGeomProperties,
+                        aoiItem.auxData // Store auxData separately
                     ]);
 
                 } else {
@@ -152,7 +157,7 @@ export class ProjectService {
                             SELECT ST_GeomFromGeoJSON($4::text) AS geom
                         )
                         INSERT INTO area_of_interest
-                        (project_id, aoi_id, name, geom, geom_properties, status)
+                        (project_id, aoi_id, name, geom, geom_properties, auxdata, status)
                         SELECT
                             $1, $2, $3,
                             CASE
@@ -166,7 +171,7 @@ export class ProjectService {
                                     )
                                 ELSE geom
                             END,
-                            $6, 1
+                            $6, $7, 1
                         FROM original_geom
                         RETURNING id;
                     `;
@@ -176,22 +181,21 @@ export class ProjectService {
                         aoiItem.name,
                         geomString,
                         buffer,
-                        aoiItem.geomProperties
+                        enhancedGeomProperties,
+                        aoiItem.auxData // Store auxData separately
                     ]);
                 }
             }
 
             // 4. Process Subscriptions
-            // FIXED: Use the mapped aoiId from the database
             if (bundle.subscriptionData && bundle.subscriptionData.length > 0) {
                 for (const sub of bundle.subscriptionData) {
                     if (sub.status !== 2) {
-                        // CRITICAL: Use the actual aoiId that was inserted into the DB
                         const actualAoiId = aoiIdMap.get(sub.aoiId) || sub.aoiId;
 
                         const subscription = new SubscriptionModel({
                             project_id: projectId,
-                            aoi_id: actualAoiId, // Use mapped aoiId
+                            aoi_id: actualAoiId,
                             channel_id: sub.channelId,
                             user_ids: sub.userIds,
                             alert_dissemination_mode: sub.alertDisseminationMode,
@@ -208,26 +212,22 @@ export class ProjectService {
 
         } catch (error) {
             await client.query('ROLLBACK');
-            console.error('Project creation failed, transaction rolled back:', error);
+            console.error('Project creation failed:', error);
             throw new Error(`Transaction failed. Details: ${error.message}`);
         } finally {
             client.release();
         }
     }
 
-    /**
-     * Updates an existing project
-     * FIXED: Proper subscription validation and aoiId handling
-     */
     async updateProject(projectId, bundle, currentUserId) {
         const client = await db.pool.connect();
         try {
             await client.query('BEGIN');
 
-            // FIXED: Validation - Ensure all active AOIs have at least one subscription
+            // Validation
             if (bundle.aoiData && bundle.aoiData.length > 0) {
                 for (const aoi of bundle.aoiData) {
-                    if (aoi.status !== 2) { // Only check active AOIs
+                    if (aoi.status !== 2) {
                         const aoiIdToCheck = aoi.aoiId || `aoi_${aoi.clientAoiId || Date.now()}`;
 
                         const hasSubscription = bundle.subscriptionData?.some(
@@ -236,8 +236,7 @@ export class ProjectService {
 
                         if (!hasSubscription) {
                             throw new Error(
-                                `AOI "${aoi.name}" must have at least one alert channel subscription. ` +
-                                `Expected aoiId: ${aoiIdToCheck}`
+                                `AOI "${aoi.name}" must have at least one alert channel subscription.`
                             );
                         }
                     }
@@ -258,13 +257,11 @@ export class ProjectService {
             // 2. Update Users WITH ROLES
             await UsersToProjectModel.deleteByProject(client, projectId);
 
-            // FIXED: Ensure current user is included
             const userDataWithCreator = [...bundle.userData];
             if (!userDataWithCreator.some(u => u.userId === currentUserId)) {
                 userDataWithCreator.push({ userId: currentUserId, roles: [] });
             }
 
-            // REINSERT ALL WITH ROLES
             for (const user of userDataWithCreator) {
                 const model = new UsersToProjectModel({
                     user_id: user.userId,
@@ -274,20 +271,31 @@ export class ProjectService {
                 await model.save(client);
             }
 
-            // 3. Process AOIs (same as create - code omitted for brevity)
+            // 3. Process AOIs
             const processedAoiIds = new Set();
             const aoiIdMap = new Map();
 
             for (const aoiItem of bundle.aoiData) {
-                const { aoiId, dbId, status, name, geomGeoJson, geomProperties, clientAoiId } = aoiItem;
+                const { aoiId, dbId, status, name, geomGeoJson, geomProperties, auxData, clientAoiId } = aoiItem;
                 const finalAoiId = aoiId || `aoi_${clientAoiId || Date.now()}`;
 
                 if (processedAoiIds.has(finalAoiId)) {
-                    console.error(`[Update] Duplicate aoiId detected: ${finalAoiId}. Skipping.`);
+                    console.error(`[Update] Duplicate aoiId: ${finalAoiId}. Skipping.`);
                     continue;
                 }
                 processedAoiIds.add(finalAoiId);
                 aoiIdMap.set(clientAoiId, finalAoiId);
+
+                // Extract and store original coordinates
+                const bufferConfig = geomProperties?.bufferConfig || [];
+                const enhancedGeomProperties = {
+                    ...geomProperties,
+                    originalCoordinates: bufferConfig.map(config => ({
+                        type: config.type,
+                        coordinates: config.originalCoordinates,
+                        buffer: config.buffer
+                    }))
+                };
 
                 if (dbId) {
                     if (status === 2) {
@@ -302,15 +310,16 @@ export class ProjectService {
                         );
                         continue;
                     } else {
+                        // CRITICAL: Update both geom_properties AND auxdata
                         await client.query(
                             `UPDATE area_of_interest 
-                             SET name = $1, geom_properties = $2, status = $3 
-                             WHERE id = $4;`,
-                            [name, geomProperties, status, dbId]
+                             SET name = $1, geom_properties = $2, auxdata = $3, status = $4 
+                             WHERE id = $5;`,
+                            [name, enhancedGeomProperties, auxData, status, dbId]
                         );
                     }
                 } else {
-                    // Insert new AOI (same logic as createProject - omitted for brevity)
+                    // Insert new AOI with original coordinates
                     const geomString = JSON.stringify(geomGeoJson);
                     const buffer = Number(geomProperties?.buffer) || 0;
 
@@ -319,7 +328,7 @@ export class ProjectService {
                             SELECT ST_GeomFromGeoJSON($4::text) AS geom
                         )
                         INSERT INTO area_of_interest
-                        (project_id, aoi_id, name, geom, geom_properties, status)
+                        (project_id, aoi_id, name, geom, geom_properties, auxdata, status)
                         SELECT $1, $2, $3,
                             CASE
                                 WHEN ST_GeometryType(geom) IN ('ST_Point', 'ST_LineString') THEN
@@ -332,13 +341,13 @@ export class ProjectService {
                                     )
                                 ELSE geom
                             END,
-                            $6, 1
+                            $6, $7, 1
                         FROM original_geom;
-                    `, [projectId, finalAoiId, name, geomString, buffer, geomProperties]);
+                    `, [projectId, finalAoiId, name, geomString, buffer, enhancedGeomProperties, auxData]);
                 }
             }
 
-            // 4. Process Subscriptions
+            // 4. Process Subscriptions (same as create)
             if (bundle.subscriptionData && bundle.subscriptionData.length > 0) {
                 for (const sub of bundle.subscriptionData) {
                     const actualAoiId = aoiIdMap.get(sub.aoiId) || sub.aoiId;
@@ -379,7 +388,7 @@ export class ProjectService {
 
         } catch (error) {
             await client.query('ROLLBACK');
-            console.error('Project update failed, transaction rolled back:', error);
+            console.error('Project update failed:', error);
             throw new Error(`Update failed. Details: ${error.message}`);
         } finally {
             client.release();
@@ -431,7 +440,7 @@ export class ProjectService {
                     project_id: aoiInstance.projectId,
                     aoi_id: aoiInstance.aoiId,
                     name: aoiInstance.name,
-                    auxdata: aoiInstance.auxData,
+                    auxdata: aoiInstance.auxData, // Return auxData
                     geom_properties: aoiInstance.geomProperties,
                     geomGeoJson: aoiInstance.geomGeoJson,
                     status: aoiInstance.status || 1,
@@ -508,8 +517,6 @@ export class ProjectService {
         ${aoiFilter}
         ORDER BY a.alert_timestamp ASC;
     `;
-
-        console.log('[ProjectService] Running query with params:', params);
 
         const result = await db.query(query, params);
 

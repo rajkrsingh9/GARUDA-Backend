@@ -6,7 +6,7 @@ import { DBClient } from '../db/DBClient.js'; // Used to look up which users are
 
 // --- CONFIGURATION ---
 // The Kafka topic name where PostgreSQL (via Debezium/CDC) publishes new 'alerts' records.
-const KAFKA_TOPIC = 'dbserver1.public.alerts';
+const KAFKA_TOPIC = 'garuda_cdc.public.alerts';
 // Group ID for the Kafka consumer, ensures messages aren't processed by other instances.
 const KAFKA_GROUP_ID = 'garuda-alerts-group';
 // Connection URL for Redis (used for alert caching/history).
