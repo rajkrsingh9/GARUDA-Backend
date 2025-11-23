@@ -10,8 +10,8 @@
 # Environment and Configuration Files
 # ------------------------------------
 # CRITICAL: Exclude all .env files that contain secrets
-# The backend/.env file contains your DB credentials
-/backend/.env 
+# The backend/.env file contains your DB crede.
+./.env 
 
 # Node.js Log files
 npm-debug.log
