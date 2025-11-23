@@ -11,7 +11,7 @@
 # ------------------------------------
 # CRITICAL: Exclude all .env files that contain secrets
 # The backend/.env file contains your DB crede.
-./.env 
+.env 
 
 # Node.js Log files
 npm-debug.log
