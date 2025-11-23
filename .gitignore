@@ -1,0 +1,25 @@
+# ------------------------------------
+# Node.js Dependencies and Build Artifacts
+# ------------------------------------
+/backend/node_modules
+/frontend/node_modules
+/backend/dist
+/frontend/dist
+
+# ------------------------------------
+# Environment and Configuration Files
+# ------------------------------------
+# CRITICAL: Exclude all .env files that contain secrets
+# The backend/.env file contains your DB credentials
+/backend/.env 
+
+# Node.js Log files
+npm-debug.log
+.DS_Store
+
+# ------------------------------------
+# Kafka/Debezium/Temporary Files (Outside the project folder)
+# These were temporary and should not be tracked, but listing here for safety
+# ------------------------------------
+/tmp/connect.offsets
+/tmp/kraft-combined-logs
