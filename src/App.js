@@ -52,9 +52,20 @@ export class App {
         initAlertsSSE(this.app);
     }
 
+
     start() {
-        this.app.listen(this.port, () => {
-            console.log(`⚡️ Garuda V1 Server running on http://localhost:${this.port}`);
-        });
+        const host = process.env.HOST || '0.0.0.0';
+        
+this.app.listen(this.port, host, () => {
+    console.log(`⚡️ Garuda V1 Server running on http://${host}:${this.port}`);
+});
     }
+
+
+
+    // start() {
+    //     this.app.listen(this.port, () => {
+    //         console.log(`⚡️ Garuda V1 Server running on http://localhost:${this.port}`);
+    //     });
+    // }
 }
