@@ -7,6 +7,7 @@ import { AlertModel } from '../models/AlertModel.js';
  * @typedef {object} NewAlertPayload
  * @property {number} subscription_id - FK to subscription.id
  * @property {object} content - The alert content JSONB.
+ * @property {object} [feature_geojson] - Optional GeoJSON for the feature related to the alert. // NEW
  */
 
 
@@ -31,6 +32,7 @@ export class AlertsService {
         const newAlert = new AlertModel({
             subscription_id: payload.subscription_id,
             content: payload.content,
+            feature_geojson: payload.feature_geojson || null,
         });
 
         // Save the alert to the database

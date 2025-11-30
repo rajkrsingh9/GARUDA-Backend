@@ -1,4 +1,4 @@
-// AlertsController.js
+//backend/src/controllers/AlertsController.js
 
 import { Router } from 'express';
 import { AlertsService } from '../services/AlertsService.js';

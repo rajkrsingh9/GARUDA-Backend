@@ -12,7 +12,8 @@ export class AlertModel {
     id = null;
     content = {}; // CHANGED: Renamed from 'message' to 'content'
     alertTimestamp = null;
-    subscriptionId = null; // CHANGED: Renamed from 'mappingId' to 'subscriptionId', FK to subscription.id
+    subscriptionId = null;
+    featureGeoJson = null;
 
     /**
      * Initializes a new AlertModel instance.
@@ -23,7 +24,9 @@ export class AlertModel {
     this.content = data.content || {};
     this.alertTimestamp = data.alert_timestamp || null;
     this.subscriptionId = data.subscription_id || null;
-    this.auxData = data.auxdata || null; // ADD THIS
+    this.auxData = data.auxdata || null; 
+    this.featureGeoJson = data.feature_geojson || null;
+    
 }
 
     /**
@@ -37,14 +40,15 @@ export class AlertModel {
 
         const query = `
     INSERT INTO alerts 
-    (subscription_id, content, alert_timestamp, auxdata) 
-    VALUES ($1, $2, NOW(), $3)
+    (subscription_id, content, alert_timestamp, auxdata, feature_geojson) 
+    VALUES ($1, $2, NOW(), $3, $4)
     RETURNING id, alert_timestamp;
 `;
 const values = [
     this.subscriptionId,
     this.content,
-    this.auxData || null  // ADD THIS
+    this.auxData || null,
+    this.featureGeoJson || null
 ];
 
         

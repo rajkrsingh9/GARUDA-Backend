@@ -500,6 +500,8 @@ export class ProjectService {
             a.id,
             a.content AS message,
             a.alert_timestamp AS timestamp,
+            // NEW: Select the feature_geojson column
+            a.feature_geojson, 
             p.name AS project_name,
             aoi.name AS aoi_name,
             s.aoi_id,
@@ -534,7 +536,8 @@ export class ProjectService {
                 channelId: row.channel_id,
                 channelName: row.channel_name,
                 message: row.message,
-                timestamp: row.timestamp
+                timestamp: row.timestamp,
+                featureGeoJson: row.feature_geojson || null
             })),
             timeRange: { from: firstTimestamp, to: lastTimestamp }
         };
