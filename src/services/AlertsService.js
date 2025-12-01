@@ -2,6 +2,28 @@
 
 import { AlertModel } from '../models/AlertModel.js';
 
+
+
+function normalizeFeatureGeoJson(input) {
+    if (!input) return null;
+
+    // Already a Feature
+    if (input.type === "Feature") return input;
+
+    // If raw geometry → wrap as Feature
+    if (input.type && input.coordinates) {
+        return {
+            type: "Feature",
+            geometry: input,
+            properties: {}
+        };
+    }
+
+    // If FeatureCollection → keep as is
+    return input;
+}
+
+
 /**
  * Defines the simplified payload structure from the API now using subscription_id.
  * @typedef {object} NewAlertPayload
@@ -32,7 +54,8 @@ export class AlertsService {
         const newAlert = new AlertModel({
             subscription_id: payload.subscription_id,
             content: payload.content,
-            feature_geojson: payload.feature_geojson || null,
+            feature_geojson: normalizeFeatureGeoJson(payload.feature_geojson),
+
         });
 
         // Save the alert to the database

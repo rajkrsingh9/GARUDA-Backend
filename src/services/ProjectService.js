@@ -83,7 +83,7 @@ export class ProjectService {
 
                 // CRITICAL: Extract original coordinates from bufferConfig
                 const bufferConfig = aoiItem.geomProperties?.bufferConfig || [];
-                
+
                 // Store original coordinates in geom_properties
                 const enhancedGeomProperties = {
                     ...aoiItem.geomProperties,
@@ -486,22 +486,25 @@ export class ProjectService {
         }));
     }
 
-    async getProjectAlerts(projectId, aoiId = null) {
-        let aoiFilter = '';
-        const params = [projectId];
 
-        if (aoiId) {
-            params.push(aoiId);
-            aoiFilter = ` AND s.aoi_id = $${params.length}`;
-        }
+    // backend/src/services/ProjectService.js - FIXED getProjectAlerts method
 
-        const query = `
+async getProjectAlerts(projectId, aoiId = null) {
+    let aoiFilter = '';
+    const params = [projectId];
+
+    if (aoiId) {
+        params.push(aoiId);
+        aoiFilter = ` AND s.aoi_id = $${params.length}`;
+    }
+
+    // FIXED: Proper string concatenation without template literal issues
+    const query = `
         SELECT
             a.id,
             a.content AS message,
             a.alert_timestamp AS timestamp,
-            // NEW: Select the feature_geojson column
-            a.feature_geojson, 
+            a.feature_geojson,
             p.name AS project_name,
             aoi.name AS aoi_name,
             s.aoi_id,
@@ -515,31 +518,35 @@ export class ProjectService {
             ON s.project_id = aoi.project_id 
             AND s.aoi_id = aoi.aoi_id
         JOIN alert_channel_catalogue acc ON s.channel_id = acc.id
-        WHERE s.project_id = $1
-        ${aoiFilter}
+        WHERE s.project_id = $1${aoiFilter}
         ORDER BY a.alert_timestamp ASC;
     `;
 
-        const result = await db.query(query, params);
+    console.log('[ProjectService] Executing query:', query);
+    console.log('[ProjectService] With params:', params);
 
-        const timestamps = result.rows.map(r => new Date(r.timestamp).getTime());
-        const firstTimestamp = timestamps.length ? Math.min(...timestamps) : null;
-        const lastTimestamp = timestamps.length ? Math.max(...timestamps) : null;
+    const result = await db.query(query, params);
 
-        return {
-            alerts: result.rows.map(row => ({
-                id: row.id,
-                projectId: row.project_id,
-                projectName: row.project_name,
-                aoiId: row.aoi_id,
-                aoiName: row.aoi_name,
-                channelId: row.channel_id,
-                channelName: row.channel_name,
-                message: row.message,
-                timestamp: row.timestamp,
-                featureGeoJson: row.feature_geojson || null
-            })),
-            timeRange: { from: firstTimestamp, to: lastTimestamp }
-        };
-    }
+    console.log('[ProjectService] Query returned', result.rows.length, 'alerts');
+
+    const timestamps = result.rows.map(r => new Date(r.timestamp).getTime());
+    const firstTimestamp = timestamps.length ? Math.min(...timestamps) : null;
+    const lastTimestamp = timestamps.length ? Math.max(...timestamps) : null;
+
+    return {
+        alerts: result.rows.map(row => ({
+            id: row.id,
+            projectId: row.project_id,
+            projectName: row.project_name,
+            aoiId: row.aoi_id,
+            aoiName: row.aoi_name,
+            channelId: row.channel_id,
+            channelName: row.channel_name,
+            message: row.message,
+            timestamp: row.timestamp,
+            featureGeoJson: row.feature_geojson || null
+        })),
+        timeRange: { from: firstTimestamp, to: lastTimestamp }
+    };
+}
 }
