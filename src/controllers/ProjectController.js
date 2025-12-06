@@ -7,7 +7,7 @@ import { RoleTokenModel } from '../models/RoleTokenModel.js';
 
 /**
  * ProjectController: Handles routing and HTTP request/response logic for projects.
- * Updated for subscription-based flow.
+ * Updated for subscription-based flow with permission checking.
  */
 export class ProjectController {
     router;
@@ -23,8 +23,13 @@ export class ProjectController {
         this.router.post('/', this.createProject);
         this.router.get('/', this.getProjectsByUser);
         this.router.get('/roles', this.getRoleTokens);
-        this.router.get('/alert-channels', this.getAlertChannels); // NEW
-        this.router.get('/:id/alerts', this.getProjectAlerts);
+        this.router.get('/alert-channels', this.getAlertChannels);
+
+        // CRITICAL: Specific routes MUST come before parameterized routes
+        this.router.get('/:id/permissions', this.getUserPermissions); // Before /:id
+        this.router.get('/:id/alerts', this.getProjectAlerts); // Before /:id
+
+        // Parameterized routes come last
         this.router.get('/:id', this.getProjectDetails);
         this.router.put('/:id', this.updateProject);
         this.router.delete('/:id', this.deleteProject);
@@ -95,6 +100,53 @@ export class ProjectController {
         }
     }
 
+    // backend/src/controllers/ProjectController.js - FIXED getUserPermissions endpoint
+
+    /**
+     * GET /api/projects/:id/permissions
+     * Fetches user permissions for a specific project
+     */
+    getUserPermissions = async (req, res) => {
+        const projectId = parseInt(req.params.id);
+        const currentUserId = req.header('X-User-ID') || 'user123';
+
+        if (isNaN(projectId)) {
+            return res.status(400).json({
+                message: 'Invalid Project ID format.',
+                error: 'PROJECT_ID_INVALID'
+            });
+        }
+
+        try {
+            const permissions = await this.projectService.getUserPermissions(projectId, currentUserId);
+            return res.status(200).json(permissions);
+        } catch (error) {
+            console.error('[ProjectController] Error fetching permissions:', error);
+
+            // Handle specific error cases
+            if (error.message === 'Project not found') {
+                return res.status(404).json({
+                    error: 'Project not found.',
+                    message: error.message
+                });
+            }
+
+            if (error.message === 'User does not have access to this project') {
+                return res.status(403).json({
+                    error: 'Access denied.',
+                    message: error.message
+                });
+            }
+
+            // Generic error
+            return res.status(500).json({
+                error: 'Failed to fetch permissions.',
+                message: error.message,
+                details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+            });
+        }
+    }
+
     /**
      * PUT /api/projects/:id
      * Updates an existing project
@@ -106,10 +158,43 @@ export class ProjectController {
         if (isNaN(projectId)) {
             return res.status(400).json({ message: 'Invalid Project ID format.' });
         }
-        
+
         const projectBundle = req.body;
 
         try {
+            // Check permissions before update
+            const permissions = await this.projectService.getUserPermissions(projectId, currentUserId);
+
+            if (!permissions.isOwner && !permissions.isAdmin) {
+                // Check if user has required permissions for the changes
+                const hasProjectInfoUpdate = permissions.roles.includes(2); // project_info_update
+                const hasUserUpdate = permissions.roles.includes(3); // user_update
+                const hasAoiUpdate = permissions.roles.includes(4); // aoi_update
+                const hasSubscriptionUpdate = permissions.roles.includes(5); // subscription_update
+
+                // Validate permissions for each section
+                if (projectBundle.projectBasicInfo && !hasProjectInfoUpdate) {
+                    return res.status(403).json({
+                        error: 'Permission denied: project_info_update required'
+                    });
+                }
+                if (projectBundle.userData && !hasUserUpdate) {
+                    return res.status(403).json({
+                        error: 'Permission denied: user_update required'
+                    });
+                }
+                if (projectBundle.aoiData && !hasAoiUpdate) {
+                    return res.status(403).json({
+                        error: 'Permission denied: aoi_update required'
+                    });
+                }
+                if (projectBundle.subscriptionData && !hasSubscriptionUpdate) {
+                    return res.status(403).json({
+                        error: 'Permission denied: subscription_update required'
+                    });
+                }
+            }
+
             const updatedProject = await this.projectService.updateProject(
                 projectId,
                 projectBundle,
@@ -132,12 +217,22 @@ export class ProjectController {
 
     /**
      * DELETE /api/projects/:id
-     * Deletes a project
+     * Deletes a project (only owner/admin can delete)
      */
     deleteProject = async (req, res) => {
         const projectId = parseInt(req.params.id);
+        const currentUserId = req.header('X-User-ID') || 'user123';
 
         try {
+            // Check if user is owner or admin
+            const permissions = await this.projectService.getUserPermissions(projectId, currentUserId);
+
+            if (!permissions.isOwner && !permissions.isAdmin) {
+                return res.status(403).json({
+                    error: 'Permission denied: Only project owner or admin can delete projects.'
+                });
+            }
+
             const success = await this.projectService.deleteProject(projectId);
 
             if (success) {
@@ -166,15 +261,14 @@ export class ProjectController {
     }
 
     getRoleTokens = async (req, res) => {
-    try {
-        const roles = await RoleTokenModel.findAll();
-        return res.status(200).json(roles);
-    } catch (error) {
-        console.error('Error fetching role tokens:', error);
-        return res.status(500).json({ error: 'Failed to fetch roles.' });
-    }
-};
-
+        try {
+            const roles = await RoleTokenModel.findAll();
+            return res.status(200).json(roles);
+        } catch (error) {
+            console.error('Error fetching role tokens:', error);
+            return res.status(500).json({ error: 'Failed to fetch roles.' });
+        }
+    };
 
     /**
      * GET /api/projects/:id/alerts
@@ -182,7 +276,7 @@ export class ProjectController {
      */
     getProjectAlerts = async (req, res) => {
         const projectId = parseInt(req.params.id);
-        const aoiId = req.query.aoiId || null; // Keep as string (TEXT type)
+        const aoiId = req.query.aoiId || null;
 
         if (isNaN(projectId)) {
             return res.status(400).json({ message: 'Invalid Project ID format.' });
@@ -195,13 +289,10 @@ export class ProjectController {
             return res.status(200).json({ alerts, timeRange });
         } catch (error) {
             console.error('Controller Error fetching project alerts:', error);
-            return res.status(500).json({ 
-                error: 'Failed to fetch project alerts.', 
-                details: error.message 
+            return res.status(500).json({
+                error: 'Failed to fetch project alerts.',
+                details: error.message
             });
         }
     }
-
-
-
 }

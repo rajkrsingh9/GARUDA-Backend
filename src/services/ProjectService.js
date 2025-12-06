@@ -55,8 +55,19 @@ export class ProjectService {
 
             // 2. Add Users to Project WITH ROLES
             const userDataWithCreator = [...bundle.userData];
-            if (!userDataWithCreator.some(u => u.userId === currentUserId)) {
-                userDataWithCreator.push({ userId: currentUserId, roles: [] });
+            const creatorIndex = userDataWithCreator.findIndex(u => u.userId === currentUserId);
+
+            if (creatorIndex >= 0) {
+                // Creator exists in userData - ensure they have admin role
+                if (!userDataWithCreator[creatorIndex].roles.includes(1)) {
+                    userDataWithCreator[creatorIndex].roles.push(1);
+                }
+            } else {
+                // Creator not in userData - add them with admin role
+                userDataWithCreator.push({
+                    userId: currentUserId,
+                    roles: [1] // Admin role
+                });
             }
 
             for (const user of userDataWithCreator) {
@@ -468,6 +479,76 @@ export class ProjectService {
         }
     }
 
+
+    /**
+     * Get user permissions for a specific project
+     * Returns role information and permission flags
+     */
+    async getUserPermissions(projectId, userId) {
+        const client = await db.pool.connect();
+        try {
+            // Get project creator
+            const projectQuery = `SELECT created_by_userid FROM project WHERE id = $1;`;
+            const projectResult = await client.query(projectQuery, [projectId]);
+
+            if (projectResult.rows.length === 0) {
+                throw new Error('Project not found');
+            }
+
+            const creatorId = projectResult.rows[0].created_by_userid;
+            const isOwner = creatorId === userId;
+
+            // Get user's roles for this project
+            const userRoleQuery = `
+            SELECT user_role 
+            FROM users_to_project 
+            WHERE project_id = $1 AND user_id = $2;
+        `;
+            const userRoleResult = await client.query(userRoleQuery, [projectId, userId]);
+
+            let roles = [];
+            let isAdmin = false;
+
+            // FIXED: Check if user exists in project before accessing user_role
+            if (userRoleResult.rows.length > 0) {
+                // FIXED: Handle null or undefined user_role
+                roles = userRoleResult.rows[0].user_role || [];
+                isAdmin = roles.includes(1); // 1 = admin role
+            } else if (!isOwner) {
+                // User not found in project and is not the owner
+                throw new Error('User does not have access to this project');
+            }
+
+            // If user is the owner, they have all permissions implicitly
+            if (isOwner) {
+                isAdmin = true;
+                // Optionally add all role IDs if owner doesn't have explicit roles
+                if (roles.length === 0) {
+                    roles = [1]; // Admin role
+                }
+            }
+
+            return {
+                isOwner,
+                isAdmin,
+                roles,
+                permissions: {
+                    canEditProjectInfo: isOwner || isAdmin || roles.includes(2), // project_info_update
+                    canEditUsers: isOwner || isAdmin || roles.includes(3), // user_update
+                    canEditAOI: isOwner || isAdmin || roles.includes(4), // aoi_update
+                    canEditSubscriptions: isOwner || isAdmin || roles.includes(5), // subscription_update
+                    canDelete: isOwner || isAdmin
+                }
+            };
+        } catch (error) {
+            console.error('[ProjectService] Error fetching permissions:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+
     async deleteProject(projectId) {
         const query = `DELETE FROM project WHERE id = $1;`;
         const result = await db.query(query, [projectId]);
@@ -489,17 +570,17 @@ export class ProjectService {
 
     // backend/src/services/ProjectService.js - FIXED getProjectAlerts method
 
-async getProjectAlerts(projectId, aoiId = null) {
-    let aoiFilter = '';
-    const params = [projectId];
+    async getProjectAlerts(projectId, aoiId = null) {
+        let aoiFilter = '';
+        const params = [projectId];
 
-    if (aoiId) {
-        params.push(aoiId);
-        aoiFilter = ` AND s.aoi_id = $${params.length}`;
-    }
+        if (aoiId) {
+            params.push(aoiId);
+            aoiFilter = ` AND s.aoi_id = $${params.length}`;
+        }
 
-    // FIXED: Proper string concatenation without template literal issues
-    const query = `
+        // FIXED: Proper string concatenation without template literal issues
+        const query = `
         SELECT
             a.id,
             a.content AS message,
@@ -522,31 +603,31 @@ async getProjectAlerts(projectId, aoiId = null) {
         ORDER BY a.alert_timestamp ASC;
     `;
 
-    console.log('[ProjectService] Executing query:', query);
-    console.log('[ProjectService] With params:', params);
+        console.log('[ProjectService] Executing query:', query);
+        console.log('[ProjectService] With params:', params);
 
-    const result = await db.query(query, params);
+        const result = await db.query(query, params);
 
-    console.log('[ProjectService] Query returned', result.rows.length, 'alerts');
+        console.log('[ProjectService] Query returned', result.rows.length, 'alerts');
 
-    const timestamps = result.rows.map(r => new Date(r.timestamp).getTime());
-    const firstTimestamp = timestamps.length ? Math.min(...timestamps) : null;
-    const lastTimestamp = timestamps.length ? Math.max(...timestamps) : null;
+        const timestamps = result.rows.map(r => new Date(r.timestamp).getTime());
+        const firstTimestamp = timestamps.length ? Math.min(...timestamps) : null;
+        const lastTimestamp = timestamps.length ? Math.max(...timestamps) : null;
 
-    return {
-        alerts: result.rows.map(row => ({
-            id: row.id,
-            projectId: row.project_id,
-            projectName: row.project_name,
-            aoiId: row.aoi_id,
-            aoiName: row.aoi_name,
-            channelId: row.channel_id,
-            channelName: row.channel_name,
-            message: row.message,
-            timestamp: row.timestamp,
-            featureGeoJson: row.feature_geojson || null
-        })),
-        timeRange: { from: firstTimestamp, to: lastTimestamp }
-    };
-}
+        return {
+            alerts: result.rows.map(row => ({
+                id: row.id,
+                projectId: row.project_id,
+                projectName: row.project_name,
+                aoiId: row.aoi_id,
+                aoiName: row.aoi_name,
+                channelId: row.channel_id,
+                channelName: row.channel_name,
+                message: row.message,
+                timestamp: row.timestamp,
+                featureGeoJson: row.feature_geojson || null
+            })),
+            timeRange: { from: firstTimestamp, to: lastTimestamp }
+        };
+    }
 }

@@ -6,6 +6,7 @@ const db = DBClient.getInstance();
 
 /**
  * SubscriptionModel: Manages user subscriptions to AOI alert channels
+ * FIXED: Ensures status=2 (deleted) subscriptions are never fetched
  */
 export class SubscriptionModel {
     id = null;
@@ -97,8 +98,9 @@ export class SubscriptionModel {
 
     /**
      * Fetches all subscriptions for a project
+     * CRITICAL: Excludes deleted subscriptions (status = 2) by default
      * @param {number} projectId
-     * @param {boolean} includeDeleted
+     * @param {boolean} includeDeleted - Include status=2 subscriptions (default: false)
      * @returns {Promise<SubscriptionModel[]>}
      */
     static async findByProjectId(projectId, includeDeleted = false) {
@@ -114,6 +116,7 @@ export class SubscriptionModel {
 
     /**
      * Fetches subscriptions for a specific AOI with enriched data
+     * CRITICAL: Always excludes deleted subscriptions (status = 2)
      * @param {number} projectId
      * @param {number} aoiId
      * @returns {Promise<Object[]>}
@@ -138,6 +141,7 @@ export class SubscriptionModel {
 
     /**
      * Fetches all active subscriptions for a user across all projects
+     * CRITICAL: Only returns active (status = 1) subscriptions
      * @param {string} userId
      * @returns {Promise<Object[]>}
      */
@@ -158,5 +162,22 @@ export class SubscriptionModel {
         `;
         const result = await db.query(query, [userId]);
         return result.rows;
+    }
+
+    /**
+     * Fetches all subscriptions (active and inactive) for alert generation
+     * CRITICAL: Excludes deleted (status = 2) subscriptions
+     * @param {number} projectId
+     * @param {string} aoiId
+     * @returns {Promise<SubscriptionModel[]>}
+     */
+    static async findActiveByAoi(projectId, aoiId) {
+        const query = `
+            SELECT * FROM subscription
+            WHERE project_id = $1 AND aoi_id = $2 AND status IN (0, 1)
+            ORDER BY channel_id;
+        `;
+        const result = await db.query(query, [projectId, aoiId]);
+        return result.rows.map(row => new SubscriptionModel(row));
     }
 }
