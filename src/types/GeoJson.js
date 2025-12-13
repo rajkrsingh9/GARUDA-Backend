@@ -1,6 +1,5 @@
 // backend/src/types/GeoJson.ts
 
-
 /**
  * Defines the GeoJSON Polygon geometry type for use in backend models.
  * Coordinates are [longitude, latitude].

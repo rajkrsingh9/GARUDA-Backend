@@ -21,7 +21,7 @@ export class App {
         dotenv.config();
         this.app = express();
         this.port = parseInt(process.env.PORT || '3000');
-        
+
         this.initializeMiddleware();
         this.initializeControllers();
     }
@@ -31,11 +31,11 @@ export class App {
         this.app.use(express.json());
         // Basic check to ensure user ID is present for authorized routes (mock check)
         this.app.use('/api', (req, res, next) => {
-             if (req.url !== '/auth/login' && !req.header('X-User-ID')) {
-                 // Simulate user authentication by checking a header after login
-                 // In a real app, this would be a JWT middleware check
-             }
-             next();
+            if (req.url !== '/auth/login' && !req.header('X-User-ID')) {
+                // Simulate user authentication by checking a header after login
+                // In a real app, this would be a JWT middleware check
+            }
+            next();
         });
     }
 
@@ -43,7 +43,7 @@ export class App {
         this.app.get('/api/status', (req, res) => {
             res.json({ message: 'Garuda V1 API is online.' });
         });
-        
+
         // Register Controllers as the official API endpoints
         this.app.use('/api/auth', new AuthController().router);
         this.app.use('/api/projects', new ProjectController().router);
@@ -55,17 +55,13 @@ export class App {
 
     start() {
         const host = process.env.HOST || '0.0.0.0';
-        
-this.app.listen(this.port, host, () => {
-    console.log(`⚡️ Garuda V1 Server running on http://${host}:${this.port}`);
-});
+
+        this.app.listen(this.port, host, () => {
+            console.log(`⚡️ Garuda V1 Server running on http://${host}:${this.port}`);
+        });
     }
 
 
 
-    // start() {
-    //     this.app.listen(this.port, () => {
-    //         console.log(`⚡️ Garuda V1 Server running on http://localhost:${this.port}`);
-    //     });
-    // }
+   
 }
