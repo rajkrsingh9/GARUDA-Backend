@@ -25,11 +25,11 @@ export class ProjectController {
         this.router.get('/roles', this.getRoleTokens);
         this.router.get('/alert-channels', this.getAlertChannels);
 
-        // CRITICAL: Specific routes MUST come before parameterized routes
-        this.router.get('/:id/permissions', this.getUserPermissions); // Before /:id
-        this.router.get('/:id/alerts', this.getProjectAlerts); // Before /:id
+        this.router.get('/:id/permissions', this.getUserPermissions);
+        this.router.get('/:id/alerts', this.getProjectAlerts); 
 
-        // Parameterized routes come last
+
+        // Project Info Routes
         this.router.get('/:id', this.getProjectDetails);
         this.router.put('/:id', this.updateProject);
         this.router.delete('/:id', this.deleteProject);
@@ -100,7 +100,6 @@ export class ProjectController {
         }
     }
 
-    // backend/src/controllers/ProjectController.js - FIXED getUserPermissions endpoint
 
     /**
      * GET /api/projects/:id/permissions
@@ -165,41 +164,32 @@ export class ProjectController {
             // Check permissions before update
             const permissions = await this.projectService.getUserPermissions(projectId, currentUserId);
 
-            // Owners and admins can update everything - no further checks needed
-            if (permissions.isOwner || permissions.isAdmin) {
-                // Allow the update to proceed
-            } else {
-                // For non-owner/admin users: Check if they have permission for at least ONE section they're updating
-                // This allows users to submit the project if they have permission for any step they've edited
+            if (!permissions.isOwner && !permissions.isAdmin) {
+                // Check if user has required permissions for the changes
                 const hasProjectInfoUpdate = permissions.roles.includes(2); // project_info_update
                 const hasUserUpdate = permissions.roles.includes(3); // user_update
                 const hasAoiUpdate = permissions.roles.includes(4); // aoi_update
                 const hasSubscriptionUpdate = permissions.roles.includes(5); // subscription_update
 
-                // Check what sections are being updated
-                const updatingProjectInfo = !!projectBundle.projectBasicInfo;
-                const updatingUsers = !!projectBundle.userData;
-                const updatingAOIs = !!projectBundle.aoiData;
-                const updatingSubscriptions = !!projectBundle.subscriptionData;
-
-                // Check if user has permission for at least one section being updated
-                const hasAnyPermission = 
-                    (updatingProjectInfo && hasProjectInfoUpdate) ||
-                    (updatingUsers && hasUserUpdate) ||
-                    (updatingAOIs && hasAoiUpdate) ||
-                    (updatingSubscriptions && hasSubscriptionUpdate);
-
-                if (!hasAnyPermission) {
-                    // User doesn't have permission for any section being updated
-                    const missingPermissions = [];
-                    if (updatingProjectInfo && !hasProjectInfoUpdate) missingPermissions.push('project_info_update (role ID: 2)');
-                    if (updatingUsers && !hasUserUpdate) missingPermissions.push('user_update (role ID: 3)');
-                    if (updatingAOIs && !hasAoiUpdate) missingPermissions.push('aoi_update (role ID: 4)');
-                    if (updatingSubscriptions && !hasSubscriptionUpdate) missingPermissions.push('subscription_update (role ID: 5)');
-
+                // Validate permissions for each section
+                if (projectBundle.projectBasicInfo && !hasProjectInfoUpdate) {
                     return res.status(403).json({
-                        error: 'Permission denied',
-                        message: `You do not have permission to update any of the sections being modified. Missing permissions: ${missingPermissions.join(', ')}`
+                        error: 'Permission denied: project_info_update required'
+                    });
+                }
+                if (projectBundle.userData && !hasUserUpdate) {
+                    return res.status(403).json({
+                        error: 'Permission denied: user_update required'
+                    });
+                }
+                if (projectBundle.aoiData && !hasAoiUpdate) {
+                    return res.status(403).json({
+                        error: 'Permission denied: aoi_update required'
+                    });
+                }
+                if (projectBundle.subscriptionData && !hasSubscriptionUpdate) {
+                    return res.status(403).json({
+                        error: 'Permission denied: subscription_update required'
                     });
                 }
             }
@@ -216,26 +206,9 @@ export class ProjectController {
             });
         } catch (error) {
             console.error('Controller Error during project update:', error);
-            
-            // Handle specific error cases
-            if (error.message === 'Project not found') {
-                return res.status(404).json({
-                    error: 'Project not found.',
-                    message: error.message
-                });
-            }
-            
-            if (error.message === 'User does not have access to this project') {
-                return res.status(403).json({
-                    error: 'Access denied.',
-                    message: 'You do not have access to this project. Please contact the project owner.'
-                });
-            }
-            
             const statusCode = error.message.includes('not found') ? 404 : 500;
             return res.status(statusCode).json({
                 error: 'Failed to update project.',
-                message: error.message,
                 details: error.message
             });
         }
